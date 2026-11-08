@@ -205,8 +205,10 @@
         return stepSecond(t,p);
       }
       function createSensor() {
-        const kinds = ['first-step','first-sine','second-step'];
-        const kind = kinds[Math.floor(Math.random()*kinds.length)];
+        const firstOrder = Math.random() < 0.5;
+        const kind = firstOrder
+          ? (Math.random() < 0.5 ? 'first-step' : 'first-sine')
+          : 'second-step';
         const p = kind === 'second-step'
           ? {zeta:+fmt(rand(.2,.75),3),wn:+fmt(rand(1.5,4),3)}
           : {K:+fmt(rand(.8,2.2),3),tau:+fmt(rand(.4,2),3)};
