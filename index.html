@@ -118,7 +118,7 @@
         </div>
         <div class="how-to-step">
           <span class="step-number">02</span>
-          <div><h3>Guess</h3><p>Estimate the two hidden parameters. Use a hint if needed.</p></div>
+          <div><h3>Guess</h3><p>Estimate the hidden parameters. Use a hint if needed.</p></div>
         </div>
         <div class="how-to-step">
           <span class="step-number">03</span>
@@ -148,7 +148,7 @@
           </div>
         </form>
         <p class="hint" id="hintText" hidden></p>
-        <p class="subtle" style="font-size:.85rem">No parameters or noiseless reference curve are shown until you submit your guess.</p>
+        <p class="subtle" style="font-size:.85rem">The sensor parameters are hidden until you submit your guess (except ζ = 1 when the case is critically damped).</p>
       </div>
       <div class="display">
         <h2>Measured response</h2>
@@ -159,10 +159,10 @@
 
     <section class="panel" id="resultsPanel" hidden aria-live="polite">
       <h2>Reveal: how close was your guess?</h2>
-      <p class="subtle">The graph now overlays your predicted curve (yellow), the exact sensor response (blue), and the noisy measurement (pink).</p>
+      <p class="subtle">The graph now overlays your predicted curve (orange), the exact sensor response (blue), and the noisy measurement (pink).</p>
       <div class="result-grid" id="parameterResults"></div>
       <p class="score" id="roundScore"></p>
-      <p class="score-explain">Scoring rule: error ≤ 10% earns 100 points for that parameter. Beyond 10%, 2 points are subtracted for each additional percentage point (minimum 0). The round score averages the two parameter scores.</p>
+      <p class="score-explain">Scoring rule: error ≤ 10% earns 100 points for that parameter. Beyond 10%, 2 points are subtracted for each additional percentage point (minimum 0). The round score averages the estimated parameter scores; for critical damping, ζ = 1 is known, so only ωₙ is scored.</p>
       <div class="actions"><button type="button" class="btn primary" id="newSensor">New sensor →</button></div>
     </section>
 
@@ -172,6 +172,22 @@
       <p class="subtle"><strong>First-order step:</strong> steady value = K for a unit step; at t = τ, the output reaches 63.2% of that value.</p>
       <p class="subtle"><strong>First-order sine:</strong> use the known input frequency, the output/input amplitude ratio, and the phase lag to estimate τ and K.</p>
       <p class="subtle"><strong>Second-order underdamped step:</strong> overshoot identifies ζ; peak time helps identify ω<sub>n</sub>.</p>
+      <p class="subtle"><strong>Second-order critically damped step:</strong> ζ = 1; 26.4% of final output occurs at t = 1/ω<sub>n</sub>.</p>
+      <div class="subtle">
+        <strong>Second-order overdamped step:</strong> Read the times when the output reaches 50% and 90% of its final value (t<sub>50</sub>, t<sub>90</sub>). Calculate R = t<sub>90</sub> / t<sub>50</sub>, then compare it with these reference values for a normalized sensor (ω<sub>n</sub> = 1 rad/s):
+        <div style="overflow-x:auto;margin-top:8px">
+          <table style="width:100%;border-collapse:collapse;text-align:left;font-size:.88rem">
+            <thead><tr><th style="padding:5px 8px">ζ</th><th style="padding:5px 8px">R = t<sub>90</sub>/t<sub>50</sub></th><th style="padding:5px 8px">Normalized t<sub>50</sub> (s)</th></tr></thead>
+            <tbody>
+              <tr><td style="padding:5px 8px">1.2</td><td style="padding:5px 8px">2.62</td><td style="padding:5px 8px">1.88</td></tr>
+              <tr><td style="padding:5px 8px">1.5</td><td style="padding:5px 8px">2.90</td><td style="padding:5px 8px">2.23</td></tr>
+              <tr><td style="padding:5px 8px">2.0</td><td style="padding:5px 8px">3.10</td><td style="padding:5px 8px">2.87</td></tr>
+              <tr><td style="padding:5px 8px">2.2</td><td style="padding:5px 8px">3.14</td><td style="padding:5px 8px">3.13</td></tr>
+            </tbody>
+          </table>
+        </div>
+        Match R to estimate ζ. Then estimate ω<sub>n</sub> ≈ normalized t<sub>50</sub> / measured t<sub>50</sub>. Interpolate between rows if necessary. These are approximate estimates because of measurement noise.
+      </div>
     </section>
     <footer>ENCS4380 Interfacing Techniques · Dynamic Characteristics Toolkit · Module 4</footer>
   </div>
@@ -194,10 +210,26 @@
         const phase = -Math.atan(omega*p.tau);
         return magnitude * Math.sin(omega*t+phase);
       }
+      function dampingCase(zeta) {
+        return zeta < 1 ? 'Underdamped' : zeta === 1 ? 'Critically damped' : 'Overdamped';
+      }
       function stepSecond(t,p) {
-        const r = Math.sqrt(1-p.zeta**2), wd = p.wn*r;
-        return 1 - Math.exp(-p.zeta*p.wn*t) *
-          (Math.cos(wd*t) + p.zeta/r*Math.sin(wd*t));
+        const z=p.zeta, w=p.wn;
+        if (Math.abs(z-1)<1e-10) return 1-(1+w*t)*Math.exp(-w*t);
+        if (z<1) {
+          const r=Math.sqrt(1-z*z), wd=w*r;
+          return 1-Math.exp(-z*w*t)*(Math.cos(wd*t)+(z/r)*Math.sin(wd*t));
+        }
+        const r=Math.sqrt(z*z-1);
+        const s1=-w*(z-r), s2=-w*(z+r);
+        return 1+(s2*Math.exp(s1*t)-s1*Math.exp(s2*t))/(s1-s2);
+      }
+      function secondOrderDuration(p) {
+        const z=p.zeta, w=p.wn;
+        if (z<1) return Math.max(2.2*Math.PI/(w*Math.sqrt(1-z*z)),7/(z*w));
+        if (z===1) return 9/w;
+        const slowPole=w*(z-Math.sqrt(z*z-1));
+        return 7/slowPole;
       }
       function response(t,p) {
         if (sensor.kind === 'first-step') return stepFirst(t,p);
@@ -209,13 +241,19 @@
         const kind = firstOrder
           ? (Math.random() < 0.5 ? 'first-step' : 'first-sine')
           : 'second-step';
-        const p = kind === 'second-step'
-          ? {zeta:+fmt(rand(.2,.75),3),wn:+fmt(rand(1.5,4),3)}
-          : {K:+fmt(rand(.8,2.2),3),tau:+fmt(rand(.4,2),3)};
+        let p;
+        if (kind === 'second-step') {
+          const cases=['under','critical','over'];
+          const damping=cases[Math.floor(Math.random()*cases.length)];
+          const zeta=damping==='under' ? +fmt(rand(.2,.75),3)
+            : damping==='critical' ? 1 : +fmt(rand(1.2,2.2),3);
+          p={zeta,wn:+fmt(rand(1.5,4),3)};
+        } else {
+          p={K:+fmt(rand(.8,2.2),3),tau:+fmt(rand(.4,2),3)};
+        }
         const omega = kind === 'first-sine' ? +fmt(rand(1.0,3.0),3) : undefined;
         const duration = kind === 'first-step' ? 7*p.tau
-          : kind === 'first-sine' ? 8*Math.PI/omega
-          : Math.max(2.2*Math.PI/(p.wn*Math.sqrt(1-p.zeta*p.zeta)),7/(p.zeta*p.wn));
+          : kind === 'first-sine' ? 8*Math.PI/omega : secondOrderDuration(p);
         const times=[], truth=[], measurements=[];
         const noiseAmplitude = .015 * (kind === 'second-step' ? 1 : p.K);
         for (let i=0;i<=450;i++) {
@@ -233,16 +271,23 @@
       }
       function setChallenge() {
         const first = sensor.kind.startsWith('first');
-        $('sensorTag').textContent = first ? 'First-order sensor' : 'Second-order sensor';
+        const damping=first ? '' : dampingCase(sensor.p.zeta);
+        $('sensorTag').textContent = first ? 'First-order sensor' : `Second-order · ${damping}`;
         $('challengeText').textContent = first
           ? 'Estimate the static gain K and time constant τ.'
-          : 'Estimate the damping ratio ζ and natural frequency ωₙ.';
+          : sensor.p.zeta === 1
+            ? 'The critically damped case has ζ = 1. Estimate the natural frequency ωₙ.'
+            : 'Estimate the damping ratio ζ and natural frequency ωₙ.';
         $('inputInfo').textContent = sensor.kind==='first-sine'
           ? `Input: sin(ωt), amplitude 1, ω = ${fmt(sensor.omega,3)} rad/s. Output shown at steady state.`
           : 'Input: unit step, amplitude = 1.';
         $('guessFields').innerHTML = first
           ? field('guessK','Gain K','e.g. 1.20')+field('guessTau','Time constant τ (s)','e.g. 0.80')
-          : field('guessZeta','Damping ratio ζ (0 < ζ < 1)','e.g. 0.50')+field('guessWn','Natural frequency ωₙ (rad/s)','e.g. 2.00');
+          : sensor.p.zeta===1
+            ? `<p class="formula" style="margin:15px 0 0">Known from the damping case: ζ = 1</p>` +
+              field('guessWn','Natural frequency ωₙ (rad/s)','e.g. 2.00')
+            : field('guessZeta',sensor.p.zeta<1 ? 'Damping ratio ζ (0 < ζ < 1)' : 'Damping ratio ζ (> 1)',sensor.p.zeta<1 ? 'e.g. 0.50' : 'e.g. 1.50') +
+              field('guessWn','Natural frequency ωₙ (rad/s)','e.g. 2.00');
       }
       function makePlot(guess=null) {
         const traces=[];
@@ -271,22 +316,38 @@
         },{responsive:true,displaylogo:false});
       }
       function showHint() {
-        const hints = {
-          'first-step':'Find the final output K. Locate 63.2% of that value; the corresponding time is τ. Alternatively, ln[(K − y)/K] has slope −1/τ.',
-          'first-sine':'Measure the lag Δt between the input and output peaks. Phase magnitude φ = ωΔt, so τ = tan(φ)/ω. Then K = (output amplitude/input amplitude) × √[1+(ωτ)²].',
-          'second-step':'Overshoot fraction Mp = (peak − final value)/final value. Then ζ = −ln(Mp)/√[π²+ln²(Mp)]. Peak time tp = π/[ωₙ√(1−ζ²)].'
-        };
-        $('hintText').textContent=hints[sensor.kind];
+        let hint;
+        if (sensor.kind==='first-step') {
+          hint='Find the final output K. Locate 63.2% of that value; the corresponding time is τ. Alternatively, ln[(K − y)/K] has slope −1/τ.';
+        } else if (sensor.kind==='first-sine') {
+          hint='Measure the lag Δt between the input and output peaks. Phase magnitude φ = ωΔt, so τ = tan(φ)/ω. Then K = (output amplitude/input amplitude) × √[1+(ωτ)²].';
+        } else if (sensor.p.zeta<1) {
+          hint='Use overshoot fraction Mp = (peak − final value)/final value, then ζ = −ln(Mp)/√[π²+ln²(Mp)]. Peak time tp = π/[ωₙ√(1−ζ²)].';
+        } else if (sensor.p.zeta===1) {
+          hint='For critical damping, ζ = 1. The step response reaches about 26.4% of its final value at t = 1/ωₙ. Find that crossing time to estimate ωₙ ≈ 1/t.';
+        } else {
+          hint='Read t50 and t90 from the noisy response (times to reach 50% and 90% of the final value 1). Compute R = t90 / t50. Compare R with the Overdamped reference values in Useful Methods to estimate ζ; then estimate ωₙ ≈ normalized t50 / measured t50. Use hover for more accurate times.';
+        }
+        $('hintText').textContent=hint;
         $('hintText').hidden=false;
       }
       function readGuess() {
-        const ids = sensor.kind.startsWith('first') ? ['guessK','guessTau'] : ['guessZeta','guessWn'];
-        const values=ids.map(id=>$(id).value.trim()==='' ? NaN : Number($(id).value));
-        if (values.some(v=>!Number.isFinite(v)||v<=0)) throw new Error('Enter positive numbers for both parameters.');
-        if (!sensor.kind.startsWith('first') && values[0]>=1)
-          throw new Error('This round is underdamped, so the guessed ζ must satisfy 0 < ζ < 1.');
-        return sensor.kind.startsWith('first') ? {K:values[0],tau:values[1]}
-          : {zeta:values[0],wn:values[1]};
+        if (sensor.kind.startsWith('first')) {
+          const ids=['guessK','guessTau'];
+          const values=ids.map(id=>$(id).value.trim()==='' ? NaN : Number($(id).value));
+          if (values.some(v=>!Number.isFinite(v)||v<=0)) throw new Error('Enter positive numbers for both parameters.');
+          return {K:values[0],tau:values[1]};
+        }
+        const wnInput=$('guessWn').value.trim();
+        const wn=wnInput==='' ? NaN : Number(wnInput);
+        if (!Number.isFinite(wn)||wn<=0) throw new Error('Enter a positive natural frequency.');
+        if (sensor.p.zeta===1) return {zeta:1,wn};
+        const zInput=$('guessZeta').value.trim();
+        const zeta=zInput==='' ? NaN : Number(zInput);
+        if (!Number.isFinite(zeta)||zeta<=0) throw new Error('Enter a positive damping ratio.');
+        if (sensor.p.zeta<1 && zeta>=1) throw new Error('This round is underdamped: use 0 < ζ < 1.');
+        if (sensor.p.zeta>1 && zeta<=1) throw new Error('This round is overdamped: use ζ > 1.');
+        return {zeta,wn};
       }
       function grade(estimated,actual) {
         const error = Math.abs(estimated-actual)/actual*100;
@@ -296,6 +357,7 @@
         if (revealed) return;
         const first=sensor.kind.startsWith('first');
         const keys=first ? [['K','Gain K'],['tau','Time constant τ (s)']]
+          : sensor.p.zeta===1 ? [['wn','Natural frequency ωₙ (rad/s)']]
           : [['zeta','Damping ratio ζ'],['wn','Natural frequency ωₙ (rad/s)']];
         let sum=0;
         $('parameterResults').innerHTML=keys.map(([key,label])=>{
